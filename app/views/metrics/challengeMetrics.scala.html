@@ -5,6 +5,7 @@
 @colSize() = {@{if (challenge.isEmpty) { "3" } else { "4" }}}
 @views.html.includes.metricsIncludes(config.isDebugMode)
 @views.html.admin.common.header("Metrics", challenge.getOrElse(Challenge(-1, if (projects.isEmpty) { "All Challenges" } else { s"Projects ($projects)" }, None, -1, "")).name)
+<script src="@routes.Assets.versioned("javascripts/metrics.js")"></script>
 <section class="content">
         <!-- Info boxes -->
     <div class="row">
@@ -148,22 +149,46 @@
                                     <span class="description-text">ACTIONS PER USER PER CHALLENGE</span>
                                 </div><!-- /.description-block -->
                             </div>
+                            <div class="col-sm-3 col-xs-6">
+                                <div class="description-block border-right">
+                                    <h5 id="users_per_challenge" class="description-header"></h5>
+                                    <span class="description-text">USERS PER CHALLENGE</span>
+                                </div>
+                            </div><!-- /.col -->
+                        } else {
+                            <div class="col-sm-3 col-xs-6">
+                                <div class="description-block border-right">
+                                    <a href="@routes.Application.mapChallenge(challenge.get.id)"><button class="btn btn-block btn-success">Start</button></a>
+                                    <span class="description-text">Click here to start fixing tasks in the challenge</span>
+                                </div>
+                                @if(user.isSuperUser || user.adminForProject(challenge.get.parent)) {
+                                    <div class="description-block border-right">
+                                        <a href="@routes.FormEditController.challengeFormUI(challenge.get.parent, challenge.get.id)"><button class="btn btn-block btn-warning">Edit</button></a>
+                                        <span class="description-text">Click here to edit the challenge</span>
+                                    </div>
+                                }
+                            </div><!-- /.col -->
                         }
-                        <div class="col-sm-@colSize() col-xs-6">
-                            <div class="description-block border-right">
-                                <h5 id="users_per_challenge" class="description-header"></h5>
-                                <span class="description-text">USERS PER CHALLENGE</span>
-                            </div>
-                        </div><!-- /.col -->
                     </div><!-- /.row -->
                 </div><!-- /.box-footer -->
             </div><!-- /.box -->
         </div><!-- /.col -->
     </div><!-- /.row -->
+    @if(challenge.isEmpty) {
+        <div class="row">
+            <div class="col-md-12">
+            @views.html.metrics.challengeMetricsTable(projects)
+            </div>
+        </div>
+    }
 </section>
 <script type="application/javascript">
     var dateFormat = "YYYY-MM-DD";
-    function getMetrics(start, end) {
+    function getMetrics(start, end, dateChangeOnly) {
+        var dco = false;
+        if (typeof dateChangeOnly != 'undefined' && dateChangeOnly) {
+            dco = true;
+        }
         var activityCallback = {
             success:receiveActivityData,
             error:dataErrorHandler
@@ -179,20 +204,24 @@
         @challenge match {
             case Some(c) => {
                 jsRoutes.org.maproulette.controllers.api.DataController.getChallengeActivity(@c.id, start, end).ajax(activityCallback);
-                jsRoutes.org.maproulette.controllers.api.DataController.getChallengeSummary(@c.id, start, end).ajax(summaryCallback);
                 jsRoutes.org.maproulette.controllers.api.DataController.getUserChallengeSummary(@c.id, start, end).ajax(userCallback);
+                if (!dco) {
+                    Metrics.getChallengeSummaryPieChart($("#statusPieChart"), @c.id, true, receiveSummaryData);
+                }
             }
             case None => {
                 jsRoutes.org.maproulette.controllers.api.DataController.getProjectActivity("@projects", start, end).ajax(activityCallback);
-                jsRoutes.org.maproulette.controllers.api.DataController.getProjectSummary("@projects", start, end).ajax(summaryCallback);
                 jsRoutes.org.maproulette.controllers.api.DataController.getUserSummary("@projects", start, end).ajax(userCallback);
+                if (!dco) {
+                    Metrics.getProjectSummaryPieChart($("#statusPieChart"), "@projects", true, receiveSummaryData);
+                }
             }
         }
     }
     getMetrics(moment().subtract(6, 'days').format(dateFormat), moment().format(dateFormat));
 
     function receiveUserData(data) {
-        $("#top_users").html(data.distinctTotalUsers);
+        $("#top_users").html(data.distinctAllUsers);
         $("#actions").html(parseFloat(data.avgActionsPerUser.fixed).toFixed(2) + " <small>Fixed</small></br>" +
                 parseFloat(data.avgActionsPerUser.falsePositive).toFixed(2) + " <small>False Positives</small></br>" +
                 parseFloat(data.avgActionsPerUser.skipped).toFixed(2) + " <small>Skipped</small></br>" +
@@ -200,65 +229,39 @@
                 parseFloat(data.avgActionsPerUser.alreadyFixed).toFixed(2) + " <small>Already Fixed</small></br>"
         );
         @if(challenge.isEmpty) {
-        $("#actions_per_challenge").html(parseFloat(data.avgActionsPerChallengePerUser.fixed).toFixed(2) + " <small>Fixed</small></br>" +
-                parseFloat(data.avgActionsPerChallengePerUser.falsePositive).toFixed(2) + " <small>False Positives</small></br>" +
-                parseFloat(data.avgActionsPerChallengePerUser.skipped).toFixed(2) + " <small>Skipped</small></br>" +
-                parseFloat(data.avgActionsPerChallengePerUser.tooHard).toFixed(2) + " <small>Too Hard</small></br>" +
-                parseFloat(data.avgActionsPerChallengePerUser.alreadyFixed).toFixed(2) + " <small>Already Fixed</small></br>"
-        );
+            $("#actions_per_challenge").html(parseFloat(data.avgActionsPerChallengePerUser.fixed).toFixed(2) + " <small>Fixed</small></br>" +
+                    parseFloat(data.avgActionsPerChallengePerUser.falsePositive).toFixed(2) + " <small>False Positives</small></br>" +
+                    parseFloat(data.avgActionsPerChallengePerUser.skipped).toFixed(2) + " <small>Skipped</small></br>" +
+                    parseFloat(data.avgActionsPerChallengePerUser.tooHard).toFixed(2) + " <small>Too Hard</small></br>" +
+                    parseFloat(data.avgActionsPerChallengePerUser.alreadyFixed).toFixed(2) + " <small>Already Fixed</small></br>"
+            );
+            $("#users_per_challenge").html(parseFloat(data.avgUsersPerChallenge).toFixed(2));
         }
-        $("#users_per_challenge").html(data.avgUsersPerChallenge);
         $("#active_users").html(data.activeUsers);
     }
 
     function receiveSummaryData(data) {
-        var numOfChallenges = data.length;
-        var totalTasks = 0;
-        var fixedTasks = 0;
-        var falsePositiveTasks = 0;
-        var skippedTasks = 0;
-        var alreadyFixedTasks = 0;
-        var tooHardTasks = 0;
-        var completionRate = 0;
-        var falsePositiveRate = 0;
-        for (var i = 0; i < data.length; i++) {
-            var availableTasks = data[i].actions.available;
-            fixedTasks += data[i].actions.fixed;
-            falsePositiveTasks += data[i].actions.falsePositive;
-            skippedTasks += data[i].actions.skipped;
-            alreadyFixedTasks += data[i].actions.alreadyFixed;
-            tooHardTasks += data[i].actions.tooHard;
-            totalTasks += fixedTasks + falsePositiveTasks + skippedTasks + alreadyFixedTasks + availableTasks + tooHardTasks;
-            if (totalTasks > 0) {
-                completionRate += (fixedTasks + alreadyFixedTasks) / totalTasks;
-            }
-            if (totalTasks > 0) {
-                falsePositiveRate += falsePositiveTasks / totalTasks;
-            }
-        }
         // update the activity chart information on the side
-        $("#fixed").html("<b>" + fixedTasks + "</b>/" + totalTasks);
-        $("#fixed_bar").width((fixedTasks / totalTasks) * 100 + "%");
-        $("#false_positives").html("<b>" + falsePositiveTasks + "</b>/" + totalTasks);
-        $("#false_postives_bar").width((falsePositiveTasks / totalTasks) * 100 + "%");
-        $("#already_fixed").html("<b>" + alreadyFixedTasks + "</b>/" + totalTasks);
-        $("#already_fixed_bar").width((alreadyFixedTasks / totalTasks) * 100 + "%");
-        $("#skipped").html("<b>" + skippedTasks + "</b>/" + totalTasks);
-        $("#skipped_bar").width((skippedTasks / totalTasks) * 100 + "%");
-        $("#too_hard").html("<b>" + tooHardTasks + "</b>/" + totalTasks);
-        $("#too_hard_bar").width((tooHardTasks / totalTasks) * 100 + "%");
+        $("#fixed").html("<b>" + data.fixedTasks + "</b>/" + data.totalTasks);
+        $("#fixed_bar").width((data.fixedTasks / data.totalTasks) * 100 + "%");
+        $("#false_positives").html("<b>" + data.falsePositiveTasks + "</b>/" + data.totalTasks);
+        $("#false_postives_bar").width((data.falsePositiveTasks / data.totalTasks) * 100 + "%");
+        $("#already_fixed").html("<b>" + data.alreadyFixedTasks + "</b>/" + data.totalTasks);
+        $("#already_fixed_bar").width((data.alreadyFixedTasks / data.totalTasks) * 100 + "%");
+        $("#skipped").html("<b>" + data.skippedTasks + "</b>/" + data.totalTasks);
+        $("#skipped_bar").width((data.skippedTasks / data.totalTasks) * 100 + "%");
+        $("#too_hard").html("<b>" + data.tooHardTasks + "</b>/" + data.totalTasks);
+        $("#too_hard_bar").width((data.tooHardTasks / data.totalTasks) * 100 + "%");
         // update information in the top bar
         @if(challenge.isEmpty) {
-            $("#top_numOfChallenges").html(numOfChallenges + "</br><small>(" + totalTasks + " Tasks)</small>");
-            $("#top_fixed").html(parseFloat((completionRate / numOfChallenges) * 100).toFixed(2) + "%");
-            $("#top_fps").html(parseFloat((falsePositiveRate / numOfChallenges) * 100).toFixed(2) + "%");
+            $("#top_numOfChallenges").html(data.numOfChallenges + "</br><small>(" + data.totalTasks + " Tasks)</small>");
+            $("#top_fixed").html(parseFloat((data.completionRate / data.numOfChallenges) * 100).toFixed(2) + "%");
+            $("#top_fps").html(parseFloat((data.falsePositiveRate / data.numOfChallenges) * 100).toFixed(2) + "%");
         } else {
-            $("#top_numOfChallenges").html(totalTasks);
-            $("#top_fixed").html(fixedTasks);
-            $("#top_fps").html(falsePositiveTasks);
+            $("#top_numOfChallenges").html(data.totalTasks);
+            $("#top_fixed").html(data.fixedTasks);
+            $("#top_fps").html(data.falsePositiveTasks);
         }
-        updatePieChart(totalTasks - fixedTasks - falsePositiveTasks - alreadyFixedTasks - tooHardTasks,
-                fixedTasks, falsePositiveTasks, skippedTasks, tooHardTasks, alreadyFixedTasks);
     }
 
     $('.daterange').daterangepicker({
@@ -273,42 +276,17 @@
         startDate: moment().subtract(6, 'days'),
         endDate: moment()
     }, function (start, end) {
-        getMetrics(moment(start).format(dateFormat), moment(end).format(dateFormat));
+        getMetrics(moment(start).format(dateFormat), moment(end).format(dateFormat), true);
     });
 
     function receiveActivityData(data) {
         resetSource();
-        var availableTasks = 0;
-        var fixedTasks = 0;
-        var falsePositiveTasks = 0;
-        var skippedTasks = 0;
-        var alreadyFixedTasks = 0;
-        var tooHardTasks = 0;
         for (var i = 0; i < data.length; i++) {
             var currentStatus = data[i].status;
             var dataset = currentStatus;
             var count = data[i].count;
-            switch(currentStatus) {
-                case 0:
-                    availableTasks += count;
-                    break;
-                case 1:
-                    fixedTasks += count;
-                    break;
-                case 2:
-                    falsePositiveTasks += count;
-                    break;
-                case 3:
-                    skippedTasks += count;
-                    break;
-                case 5:
-                    dataset = 4;
-                    alreadyFixedTasks += count;
-                    break;
-                case 6:
-                    dataset = 5;
-                    tooHardTasks += count;
-                    break;
+            if (currentStatus > 4) {
+                dataset = currentStatus - 1;
             }
             addToSource(moment(data[i].date, dateFormat), dataset, count);
         }
@@ -486,28 +464,6 @@
             }
         }
         source[status][date] += count;
-    }
-
-    function updatePieChart(available, fixed, falsePositive, skipped, tooHard, alreadyFixed) {
-        $("#statusPieChart").remove();
-        $('#distContainer').append("<canvas id=\"statusPieChart\"></canvas>");
-        var pieChart = new Chart($("#statusPieChart"), {
-            type:"doughnut",
-            data: {
-                labels: ["Available", "Fixed", "False Positives", "Skipped", "Too Hard", "Already Fixed"],
-                datasets: [
-                    {
-                        data: [available, fixed, falsePositive, skipped, tooHard, alreadyFixed],
-                        backgroundColor: ["rgba(0, 0, 0, 1)", "rgba(0, 166, 90, 1)", "rgba(221, 75, 57, 1)", "rgba(243, 156, 18, 1)", "rgba(160, 32, 240, 1)", "rgba(0, 192, 239, 1)"],
-                        hoverBackgroundColor: ["rgba(0, 0, 0, 1)", "rgba(0, 166, 90, 1)", "rgba(221, 75, 57, 1)", "rgba(243, 156, 18, 1)", "rgba(160, 32, 240, 1)", "rgba(0, 192, 239, 1)"]
-                    }
-                ]
-            },
-            animation:{
-                animateScale:true
-            }
-        });
-        pieChart.update();
     }
 
     function updateChart(flow) {

@@ -289,24 +289,6 @@ L.Control.ControlPanel = L.Control.extend({
         }
     });
 
-    var mqTilesAttr = 'Tiles &copy; <a href="http://www.mapquest.com/" target="_blank">MapQuest</a> <img src="http://developer.mapquest.com/content/osm/mq_logo.png" />';
-
-    L.TileLayer.MapQuestOSM = L.TileLayer.Common.extend({
-        url: 'http://otile{s}.mqcdn.com/tiles/1.0.0/{type}/{z}/{x}/{y}.png',
-        options: {
-            subdomains: '1234',
-            type: 'osm',
-            attribution: 'Map data ' + L.TileLayer.OSM_ATTR + ', ' + mqTilesAttr
-        }
-    });
-
-    L.TileLayer.MapQuestAerial = L.TileLayer.MapQuestOSM.extend({
-        options: {
-            type: 'sat',
-            attribution: 'Imagery &copy; NASA/JPL-Caltech and U.S. Depart. of Agriculture, Farm Service Agency, ' + mqTilesAttr
-        }
-    });
-
     L.TileLayer.MapBox = L.TileLayer.Common.extend({
         url: 'http://{s}.tiles.mapbox.com/v3/{user}.{map}/{z}/{x}/{y}.png'
     });
@@ -410,28 +392,30 @@ function Challenge() {
         // See Actions.scala which contains ID's for items. 4 = Survey
         if (this.isSurvey()) {
             ToastUtils.Success("Answered question [" + data.instruction + "]");
+            MRManager.loading();
             jsRoutes.org.maproulette.controllers.api.SurveyController.answerSurveyQuestion(data.id, taskId, answerId).ajax({
-                success: function() {
+                success: MRManager.getSuccessHandler(function() {
                     if (typeof success === 'undefined') {
                         MRManager.getNextTask();
                     } else {
                         success();
                     }
-                },
+                }),
                 error: MRManager.getErrorHandler(error)
             });
         }
     };
     
     this.view = function(challengeId, filters, success, error) {
-        jsRoutes.org.maproulette.controllers.api.ChallengeController.getChallengeGeoJSON(challengeId, filters).ajax({
-            success: function(data) {
+        MRManager.loading();
+        jsRoutes.org.maproulette.controllers.api.ChallengeController.getClusteredPoints(challengeId, filters).ajax({
+            success: MRManager.getSuccessHandler(function(data) {
                 if (typeof success === 'undefined') {
-                    MRManager.viewGeoJsonData(data);
+                    MRManager.viewClusteredData(data);
                 } else {
                     success();
                 }
-            },
+            }),
             error: MRManager.getErrorHandler(error)
         });
     };
@@ -471,6 +455,7 @@ function Task() {
     };
 
     var updateData = function(update, success) {
+        MRManager.loading();
         data = update;
         if (challenge.getData().id != data.parentId) {
             challenge.updateChallenge(data.parentId, success);
@@ -502,6 +487,7 @@ function Task() {
         if (data.parentId == -1 && data.id == -1) {
             ToastUtils.Info('You are in debug mode, select a challenge to debug.');
         } else {
+
             jsRoutes.controllers.MappingController
                 .getSequentialNextTask(data.parentId, data.id)
                 .ajax({
@@ -529,7 +515,11 @@ function Task() {
     };
 
     this.getRandomNextTask = function(success, error) {
-        jsRoutes.controllers.MappingController.getRandomNextTask().ajax({
+        var taskFunction = jsRoutes.controllers.MappingController.getRandomNextTask;
+        if (MRManager.usingPriority()) {
+            taskFunction = jsRoutes.controllers.MappingController.getRandomNextTaskWithPriority;
+        }
+        taskFunction().ajax({
             success:function(update) {
                 updateData(update, MRManager.getSuccessHandler(success));
             },
@@ -551,6 +541,7 @@ function Task() {
 
 var MRManager = (function() {
     var map;
+    var markers = L.markerClusterGroup();
     var currentGeoJSON = "";
     var geojsonLayer;
     var layerControl;
@@ -590,8 +581,6 @@ var MRManager = (function() {
 
     var init = function (userSignedIn, element, point) {
         var osm_layer = new L.TileLayer.OpenStreetMap(),
-            road_layer = new L.TileLayer.MapQuestOSM(),
-            mapquest_layer = new L.TileLayer.MapQuestAerial(),
             opencycle_layer = new L.TileLayer.OpenCycleMap(),
             bing_layer = new L.TileLayer.Bing();
         map = new L.Map(element, {
@@ -603,6 +592,7 @@ var MRManager = (function() {
             ]
         });
 
+        // geojson layer
         geojsonLayer = new L.GeoJSON(null, {
             onEachFeature: function (feature, layer) {
                 if (feature.properties) {
@@ -622,11 +612,12 @@ var MRManager = (function() {
                 }
             }
         });
-
         map.addLayer(geojsonLayer);
+        // cluster marker layer
+        map.addLayer(markers);
+
         layerControl = L.control.layers(
-            {'OSM': osm_layer, 'OpenCycleMap': opencycle_layer, 'MapQuest Roads': road_layer,
-                'MapQuest Open Aerial': mapquest_layer, 'Bing Aerial': bing_layer},
+            {'OSM': osm_layer, 'OpenCycleMap': opencycle_layer, 'Bing Aerial': bing_layer},
             {'GeoJSON': geojsonLayer},
             {position:"topright"}
         );
@@ -660,16 +651,64 @@ var MRManager = (function() {
         registerHotKeys();
     };
 
+    // Displays the geojson data on the map
     var viewGeoJsonData = function(data) {
         currentGeoJSON = data;
-        geojsonLayer.clearLayers();
         geojsonLayer.addData(currentGeoJSON);
         map.fitBounds(geojsonLayer.getBounds());
         // in this scenario the task needs to be reset
         currentTask.resetTask();
         window.history.pushState("", "", "");
-        toastr.clear();
         controlPanel.update(signedIn, debugMode, false, false, false);
+    };
+
+    // Displays cluster address points on the map
+    var viewClusteredData = function(data) {
+        currentGeoJSON = {};
+        var popupFunction = function(id) {
+            return function(event) {
+                if ($("#statusPieChart_" + id).is(':empty')) {
+                    Metrics.getChallengeSummaryPieChart($("#statusPieChart_" + id), id, false);
+                }
+            };
+        };
+
+        for (var i = 0; i < data.length; i++) {
+            var title = data[i].title;
+            var marker = L.marker(new L.LatLng(data[i].point.lat, data[i].point.lng), {title:title});
+            var popupString = '<div class="popup mp-popup" id="popup_' + data[i].id + '">';
+            if (title !== "") {
+                popupString += marked("#### " + title);
+            }
+            popupString += marked(data[i].blurb);
+            if (data[i].isChallenge) {
+                // This section below is for the pie chart and small activity chart when the popup is opened
+                popupString += '<div class="row">' +
+                                '<div class="col-xs-6">' +
+                                    '<canvas id="statusPieChart_' + data[i].id + '" style="position: inherit !important; max-width:100px; max-height:100px"></canvas>' +
+                                '</div>' +
+                                '<div class="col-xs-6">' +
+                                    '<a href="#">' +
+                                        '<button onclick="MRManager.addTaskToMap(' + data[i].id + ', -1);" class="btn btn-block btn-success btn-sm">Start</button>' +
+                                    '</a>' +
+                                    '<a href="#">' +
+                                        '<button onclick="MRManager.viewChallenge(' + data[i].id + ');" class="btn btn-block btn-success btn-sm">View</button>' +
+                                    '</a>' +
+                                '</div>' +
+                               '</div>';
+                marker.on("popupopen", popupFunction(data[i].id));
+            } else {
+                popupString += '<div><a href="#">' +
+                    '<button onclick="MRManager.addTaskToMap(-1, ' + data[i].id + ');" class="btn btn-block btn-success btn-sm">Edit</button>' +
+                    '</a></div>';
+            }
+            popupString += '</div>';
+            marker.bindPopup(popupString, { maxHeight: 200 });
+
+            markers.addLayer(marker);
+        }
+        map.fitBounds(markers.getBounds());
+        currentTask.resetTask();
     };
 
     /**
@@ -677,7 +716,6 @@ var MRManager = (function() {
      * the current task geometry
      */
     var updateTaskDisplay = function() {
-        geojsonLayer.clearLayers();
         geojsonLayer.addData(currentTask.getData().geometry);
         map.fitBounds(geojsonLayer.getBounds());
         controlPanel.update(signedIn, debugMode, true, true, true);
@@ -685,7 +723,6 @@ var MRManager = (function() {
         // update the browser url to reflect the current task
         window.history.pushState("", "", "/map/" + currentTask.getChallenge().getData().id + "/" + currentTask.getData().id);
         // show the task text as a notification
-        toastr.clear();
         var taskInstruction = currentTask.getData().instruction;
         if (taskInstruction === "") {
             taskInstruction = currentTask.getChallenge().getData().instruction;
@@ -700,6 +737,36 @@ var MRManager = (function() {
         editPanel.setAsEdit();
         editPanel.hide();
         updateMRControls();
+    };
+
+    // displays a spinning loading symbol when called
+    var loading = function() {
+        markers.clearLayers();
+        geojsonLayer.clearLayers();
+        toastr.clear();
+        map.spin(true);
+        // disable the map completely
+        map.dragging.disable();
+        map.touchZoom.disable();
+        map.doubleClickZoom.disable();
+        map.scrollWheelZoom.disable();
+        map.boxZoom.disable();
+        map.keyboard.disable();
+        if (map.tap) map.tap.disable();
+        $("#map").css("cursor", "progress");
+    };
+
+    // removes the spinning loading symbol
+    var loaded = function() {
+        map.spin(false);
+        map.dragging.enable();
+        map.touchZoom.enable();
+        map.doubleClickZoom.enable();
+        map.scrollWheelZoom.enable();
+        map.boxZoom.enable();
+        map.keyboard.enable();
+        if (map.tap) map.tap.enable();
+        $("#map").css("cursor", "grab").css("cursor", "-webkit-grab").css("cursor", "-moz-grab");
     };
 
     /**
@@ -753,15 +820,37 @@ var MRManager = (function() {
                 currentSearchParameters.setChallengeId(parentId);
                 currentSearchParameters.setProjectEnabled(false);
                 currentSearchParameters.setChallengeEnabled(false);
+                currentTask.getRandomNextTask();
             } else {
+                // In this case show all the challenges on the map
+                loading();
                 currentSearchParameters.setChallengeId(-1);
                 currentSearchParameters.setProjectEnabled(true);
                 currentSearchParameters.setChallengeEnabled(true);
+                jsRoutes.org.maproulette.controllers.api.ProjectController.getClusteredPoints(-1).ajax({
+                    success: MRManager.getSuccessHandler(MRManager.viewClusteredData),
+                    error: MRManager.getErrorHandler()
+                });
             }
-            currentTask.getRandomNextTask();   
         } else {
             currentTask.updateTask(taskId);
         }
+    };
+
+    /**
+     * Shows the clustered data on the map, filtered by the parameters in the SearchParameters object
+     * 
+     * @param searchParameters
+     */
+    var getSearchedClusteredPoints = function(searchParameters) {
+        loading();
+        if (typeof searchParameters !== 'undefined') {
+            currentSearchParameters = searchParameters;
+        }  
+        jsRoutes.org.maproulette.controllers.api.ProjectController.getSearchedClusteredPoints(currentSearchParameters.getCookieString()).ajax({
+            success: MRManager.getSuccessHandler(MRManager.viewClusteredData),
+            error: MRManager.getErrorHandler()
+        });
     };
 
     /**
@@ -981,19 +1070,25 @@ var MRManager = (function() {
     };
 
     var getSuccessHandler = function(success) {
+        var handler = success;
         if (typeof success === 'undefined') {
-            return MRManager.updateDisplayTask;
-        } else {
-            return success;
+            handler = MRManager.updateDisplayTask;
         }
+        return function(data) {
+            loaded();
+            handler(data);
+        };
     };
 
     var getErrorHandler = function(error) {
+        var handler = error;
         if (typeof error === 'undefined') {
-            return ToastUtils.handleError;
-        } else {
-            return error;
+            handler = ToastUtils.handleError;
         }
+        return function(err) {
+            loaded();
+            handler(err);
+        };
     };
 
     /**
@@ -1018,7 +1113,11 @@ var MRManager = (function() {
     };
     
     var viewChallenge = function(challengeId, filters) {
-        currentTask.getChallenge().view(challengeId, filters);      
+        currentTask.getChallenge().view(challengeId, filters);
+    };
+
+    var usingPriority = function() {
+        return true;
     };
 
     return {
@@ -1042,7 +1141,12 @@ var MRManager = (function() {
         getCurrentChallengeData: getCurrentChallengeData,
         updateGeoJsonViewer: updateGeoJsonViewer,
         viewGeoJsonData: viewGeoJsonData,
-        viewChallenge: viewChallenge
+        viewClusteredData: viewClusteredData,
+        viewChallenge: viewChallenge,
+        usingPriority: usingPriority,
+        loading:loading,
+        loaded:loaded,
+        getSearchedClusteredPoints:getSearchedClusteredPoints
     };
 
 }());

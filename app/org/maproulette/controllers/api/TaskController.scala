@@ -7,7 +7,7 @@ import io.swagger.annotations.{Api, ApiOperation}
 import org.maproulette.actions._
 import org.maproulette.controllers.CRUDController
 import org.maproulette.models.dal.{TagDAL, TaskDAL}
-import org.maproulette.models.{Tag, Task}
+import org.maproulette.models.{Challenge, Tag, Task}
 import org.maproulette.exception.{InvalidException, NotFoundException}
 import org.maproulette.session.{SearchParameters, SessionManager, User}
 import org.maproulette.utils.Utils
@@ -70,10 +70,13 @@ class TaskController @Inject() (override val sessionManager: SessionManager,
     * @param body The incoming body from the request
     * @return
     */
-  override def updateCreateBody(body: JsValue): JsValue = {
+  override def updateCreateBody(body: JsValue, user:User): JsValue = {
+    // add a default priority, this will be updated later when the task is created if there are
+    // priority rules defined in the challenge parent
+    val updatedBody = Utils.insertIntoJson(body, "priority", Challenge.PRIORITY_HIGH)(IntWrites)
     // We need to update the geometries to make sure that we handle all the different types of
     // geometries that you can deal with like WKB or GeoJSON
-    updateGeometryData(super.updateCreateBody(body))
+    updateGeometryData(super.updateCreateBody(updatedBody, user))
   }
 
 
@@ -84,8 +87,8 @@ class TaskController @Inject() (override val sessionManager: SessionManager,
     * @param body The request body
     * @return The updated request body
     */
-  override def updateUpdateBody(body: JsValue): JsValue =
-    updateGeometryData(super.updateUpdateBody(body))
+  override def updateUpdateBody(body: JsValue, user:User): JsValue =
+    updateGeometryData(super.updateUpdateBody(body, user))
 
   /**
     * Function can be implemented to extract more information than just the default create data,

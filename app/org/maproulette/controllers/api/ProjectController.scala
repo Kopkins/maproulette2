@@ -3,10 +3,11 @@ package org.maproulette.controllers.api
 import javax.inject.Inject
 
 import io.swagger.annotations.Api
+import org.apache.commons.lang3.StringUtils
 import org.maproulette.actions.{ActionManager, ProjectType, TaskViewed}
 import org.maproulette.controllers.ParentController
 import org.maproulette.models.dal.{ProjectDAL, TaskDAL}
-import org.maproulette.models.{Challenge, Project}
+import org.maproulette.models.{Challenge, ClusteredPoint, Project}
 import org.maproulette.session.{SearchParameters, SessionManager, User}
 import org.maproulette.utils.Utils
 import play.api.libs.json._
@@ -39,6 +40,8 @@ class ProjectController @Inject() (override val childController:ChallengeControl
   // The type of object that this controller deals with.
   override implicit val itemType = ProjectType()
 
+  implicit val writes = ClusteredPoint.clusteredPointWrites
+
   /**
     * This function allows sub classes to modify the body, primarily this would be used for inserting
     * default elements into the body that shouldn't have to be required to create an object.
@@ -46,8 +49,8 @@ class ProjectController @Inject() (override val childController:ChallengeControl
     * @param body The incoming body from the request
     * @return
     */
-  override def updateCreateBody(body: JsValue): JsValue = {
-    var jsonBody = super.updateCreateBody(body)
+  override def updateCreateBody(body: JsValue, user:User): JsValue = {
+    var jsonBody = super.updateCreateBody(body, user)
     jsonBody = Utils.insertIntoJson(jsonBody, "groups", Array.emptyShortArray)(arrayWrites[Short])
     Utils.insertIntoJson(jsonBody, "enabled", true)(BooleanWrites)
   }
@@ -85,6 +88,29 @@ class ProjectController @Inject() (override val childController:ChallengeControl
       val result = taskDAL.getRandomTasks(User.userOrMocked(user), params, limit)
       result.foreach(task => actionManager.setAction(user, itemType.convertToItem(task.id), TaskViewed(), ""))
       Ok(Json.toJson(result))
+    }
+  }
+
+  def getSearchedClusteredPoints(searchCookie:String) = Action.async { implicit request =>
+    sessionManager.userAwareRequest { implicit user =>
+      val searchParams = SearchParameters.convert(searchCookie)
+      Ok(Json.toJson(dal.getSearchedClusteredPoints(searchParams)))
+    }
+  }
+
+  def getClusteredPoints(projectId:Long, challengeIds:String) = Action.async { implicit request =>
+    sessionManager.userAwareRequest { implicit user =>
+      val pid = if (projectId < 0) {
+        None
+      } else {
+        Some(projectId)
+      }
+      val cids = if (StringUtils.isEmpty(challengeIds)) {
+        List.empty
+      } else {
+        challengeIds.split(",").map(_.toLong).toList
+      }
+      Ok(Json.toJson(dal.getClusteredPoints(pid, cids)))
     }
   }
 }

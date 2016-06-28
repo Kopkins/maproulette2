@@ -7,13 +7,13 @@ import anorm._
 import anorm.SqlParser._
 import org.maproulette.cache.CacheManager
 import org.maproulette.exception.UniqueViolationException
-import org.maproulette.models.{Challenge, Project}
+import org.maproulette.models._
 import org.maproulette.permissions.Permission
-import org.maproulette.session.{Group, User}
+import org.maproulette.session.{Group, SearchParameters, User}
 import org.maproulette.session.dal.UserGroupDAL
 import play.api.Logger
 import play.api.db.Database
-import play.api.libs.json.JsValue
+import play.api.libs.json.{JsValue, Json}
 
 /**
   * Specific functions for the project data access layer
@@ -46,6 +46,14 @@ class ProjectDAL @Inject() (override val db:Database,
       case id ~ name ~ description ~ enabled =>
         new Project(id, name, description, userGroupDAL.getProjectGroups(id, User.superUser), enabled)
     }
+  }
+
+  val pointParser = long("id") ~ str("name") ~ str("instruction") ~ str("location") map {
+    case id ~ name ~ instruction ~ location =>
+      val locationJSON = Json.parse(location)
+      val coordinates = (locationJSON \ "coordinates").as[List[Double]]
+      val point = Point(coordinates(1), coordinates.head)
+      ClusteredPoint(id, name, point, instruction, true)
   }
 
   /**
@@ -171,6 +179,58 @@ class ProjectDAL @Inject() (override val db:Database,
                     LIMIT ${sqlLimit(limit)} OFFSET $offset"""
       SQL(query).on('ss -> search(searchString), 'ids -> user.groups.map(_.id)).as(parser.*)
         .map(v => v._1 -> (v._2, v._3)).toMap
+    }
+  }
+
+  /**
+    * Retrieves the clustered json points for a searched set of challenges
+    *
+    * @param params
+    * @return
+    */
+  def getSearchedClusteredPoints(params: SearchParameters)
+                                (implicit c:Connection=null) : List[ClusteredPoint] = {
+    withMRConnection { implicit c =>
+      val query = s"""
+          SELECT c.id, c.name, c.instruction, ST_AsGeoJSON(c.location) AS location
+          FROM challenges c
+          INNER JOIN projects p ON p.id = c.parent_id
+          WHERE c.location IS NOT NULL AND (
+            SELECT COUNT(*) FROM tasks
+            WHERE parent_id = c.id AND status IN (${Task.STATUS_CREATED},${Task.STATUS_SKIPPED},${Task.STATUS_TOO_HARD})) > 0
+         ${searchField("c.name", "AND", "cs")}
+         ${searchField("p.name", "AND", "ps")}
+         ${enabled(params.challengeEnabled, "c")} ${enabled(params.projectEnabled, "p")}
+         ${if (params.projectId.isDefined && params.projectId.get > 0) {s" AND c.parent_id = ${params.projectId.get}"} else {""}}
+         """
+        SQL(query).on(
+          'cs -> search(params.challengeSearch),
+          'ps -> search(params.projectSearch)
+        ).as(pointParser.*)
+    }
+  }
+
+  /**
+    * Retrieves the clustered json for challenges
+    *
+    * @param projectId The project id for the requested challenges, if None, then retrieve all challenges
+    * @param challengeIds A list of challengeId's that you can filter the result by
+    * @param enabledOnly Show only the enabled challenges
+    * @return A list of ClusteredPoint objects
+    */
+  def getClusteredPoints(projectId:Option[Long]=None, challengeIds:List[Long]=List.empty,
+                              enabledOnly:Boolean=true)(implicit c:Connection=null) : List[ClusteredPoint] = {
+    withMRConnection { implicit c =>
+      SQL"""SELECT c.id, c.name, c.instruction, ST_AsGeoJSON(c.location) AS location
+              FROM challenges c
+              INNER JOIN projects p ON p.id = c.parent_id
+              WHERE c.location IS NOT NULL AND (
+                SELECT COUNT(*) FROM tasks
+                WHERE parent_id = c.id AND status IN (${Task.STATUS_CREATED},${Task.STATUS_SKIPPED},${Task.STATUS_TOO_HARD})) > 0
+              #${enabled(enabledOnly, "c")} #${enabled(enabledOnly, "p")}
+              #${if(projectId.isDefined) { s" AND c.parent_id = ${projectId.get}"} else { "" }}
+              #${if(challengeIds.nonEmpty) { s" AND c.id IN (${challengeIds.mkString(",")})"} else { "" }}
+        """.as(pointParser.*)
     }
   }
 }
