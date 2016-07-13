@@ -7,7 +7,7 @@ You will need to install PostgreSQL 9.5 and PosGIS 2.2.1. The default ubuntu rep
 You will also need to get a Java 8 JDK which is not in the default Ubuntu repositories. It is easiest to use [another repository](http://ubuntuhandbook.org/index.php/2015/01/install-openjdk-8-ubuntu-14-04-12-04-lts/). Check that your java version is 1.8 `java -version`
 
 ## Get the Map Roulette code
-You can find the general instructions for installing Map Roulette [here](url=github.com/maproulette/maproulette2) under the Linux heading.
+You can find the general instructions for installing Map Roulette [here](github.com/maproulette/maproulette2) under the Linux heading.
 
 Instead of exporting the database url and the application keys, it is recommended to set them in `dev.conf`. It is located at `conf/dev.conf` in your maproulette2 git repository. By default, the Map Roulette local server uses a dev instance of OpenStreetMap, however you can change this under `osm.server` in `dev.conf`.
 
