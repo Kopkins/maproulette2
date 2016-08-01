@@ -3,6 +3,7 @@
 import requests
 import json
 
+url = 'http://localhost:9000'
 header = {'Content-Type': 'application/json',
           'apiKey': '2-gkXTYPGqJBIW3mP/fADklG9Tgy3JHYb0eeM6y2rR8Tgo1bNy/r1cuWBiRYTik0dtimjcbLxI'}
 
@@ -38,10 +39,10 @@ def manage(type, create=False):
     # Send off the payload to the appropriate endpoint
     response = ''
     if create:
-        response = requests.post('http://localhost:9000/api/v2/{}'.format(type),
+        response = requests.post('{}/api/v2/{}'.format(url, type),
                                  data=json.dumps(payload), headers=header)
     else:
-        response = requests.put('http://localhost:9000/api/v2/{}/{}'.format(type, payload['id']),
+        response = requests.put('{}/api/v2/{}/{}'.format(url, type, payload['id']),
                                 data=json.dumps(payload), headers=header)
     print(response.status_code, response.text)
 
@@ -87,11 +88,11 @@ def task_manager(update=True):
             tasks.append(task)
             task_num += 1
 
-            # if we have a significant number of tasks, push them up to the server so the size of 
+            # if we have a significant number of tasks, push them up to the server so the size of
             # the request isn't too large
             if len(tasks) >= 20000:
                 print('20,000 task capacity reached... uploading part... ', end='', flush=True)
-                requests.post('http://localhost:9000/api/v2/tasks', data=json.dumps(tasks), headers=header)
+                requests.post('{}/api/v2/tasks'.format(url), data=json.dumps(tasks), headers=header)
                 print('Done!')
 
                 # reset the tasks list since the others were sent off
@@ -99,7 +100,12 @@ def task_manager(update=True):
 
         # if we end up here, we've finished the task creation. send off whats left.
         print('Uploading {} tasks' % len(tasks))
-        requests.post('http://localhost:9000/api/v2/tasks', data=json.dumps(tasks), headers=header)
+        requests.post('{}/api/v2/tasks'.format(url), data=json.dumps(tasks), headers=header)
+
+
+def get_tasks_from_api(challenge_id):
+    response = requests.get('{}/api/v2/challenge/{}/children'.format(url, challenge_id), headers=header)
+    print(response.status_code)
 
 
 if __name__ == '__main__':
