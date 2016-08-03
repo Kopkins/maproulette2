@@ -2,56 +2,57 @@
 
 import requests
 import json
+from config import config
 
-url = 'http://localhost:9000'
-header = {'Content-Type': 'application/json',
-          'apiKey': '2-gkXTYPGqJBIW3mP/fADklG9Tgy3JHYb0eeM6y2rR8Tgo1bNy/r1cuWBiRYTik0dtimjcbLxI'}
+class admin_tool():
+    header = {'Content-Type': 'application/json',
+              'apiKey': config.api_key}
 
-required = ['name', 'instruction', 'id']
-fields = {'project': ['name', 'description'],
-          'challenge': ['name', 'parent', 'identifier', 'difficulty',  'description',
-                        'blurb', 'instruction']
-         }
+    required = ['name', 'instruction', 'id']
+    fields = {'project': ['name', 'description'],
+              'challenge': ['name', 'parent', 'identifier', 'difficulty',  'description',
+                            'blurb', 'instruction']
+             }
 
-def manage(type, create=False):
-    print('Enter each field or leave blank to skip')
-    payload = {}
+    def manage(type, create=False):
+        print('Enter each field or leave blank to skip')
+        payload = {}
 
-    # if it's being updated we need it's ID
-    if not create:
-        # Needs the ID field if being updated
-        fields[type].append('id')
+        # if it's being updated we need it's ID
+        if not create:
+            # Needs the ID field if being updated
+            fields[type].append('id')
 
-    # fill in all the fields for the api call
-    for field in fields[type]:
+        # fill in all the fields for the api call
+        for field in fields[type]:
 
-        # if it's a required field, make sure it's filled in
-        data = ''
-        if field in required:
-            while not data:
-                print(field, 'is required')
+            # if it's a required field, make sure it's filled in
+            data = ''
+            if field in required:
+                while not data:
+                    print(field, 'is required')
+                    data = input(field + ': ')
+            else:
                 data = input(field + ': ')
+            if data:
+                payload[field] = data
+
+        # Send off the payload to the appropriate endpoint
+        response = ''
+        if create:
+            response = requests.post('{}/api/v2/{}'.format(config.url, type),
+                                     data=json.dumps(payload), headers=header)
         else:
-            data = input(field + ': ')
-        if data:
-            payload[field] = data
+            response = requests.put('{}/api/v2/{}/{}'.format(config.url, type, payload['id']),
+                                    data=json.dumps(payload), headers=header)
+        return response
 
-    # Send off the payload to the appropriate endpoint
-    response = ''
-    if create:
-        response = requests.post('{}/api/v2/{}'.format(url, type),
-                                 data=json.dumps(payload), headers=header)
-    else:
-        response = requests.put('{}/api/v2/{}/{}'.format(url, type, payload['id']),
-                                data=json.dumps(payload), headers=header)
-    print(response.status_code, response.text)
+    def task_manager():
 
+        # open the file with our task geojson
+        with open(config.geojson_file) as task_file:
+            geojson = json.loads(task_file.read())
 
-def task_manager(update=True):
-
-    # open the file with our task geojson
-    with open('maproulette_tasks.geojson') as task_file:
-        geojson = json.loads(task_file.read())
         tasks = []
         task_num = 1
 
@@ -90,26 +91,36 @@ def task_manager(update=True):
 
             # if we have a significant number of tasks, push them up to the server so the size of
             # the request isn't too large
-            if len(tasks) >= 20000:
-                print('20,000 task capacity reached... uploading part... ', end='', flush=True)
-                requests.post('{}/api/v2/tasks'.format(url), data=json.dumps(tasks), headers=header)
-                print('Done!')
-
+            if len(tasks) >= 10000:
+                upload_tasks(tasks)
                 # reset the tasks list since the others were sent off
                 tasks = []
 
         # if we end up here, we've finished the task creation. send off whats left.
-        print('Uploading {} tasks' % len(tasks))
-        requests.post('{}/api/v2/tasks'.format(url), data=json.dumps(tasks), headers=header)
+        upload_tasks(tasks)
 
+    def generate_tasks(geojson):
+        pass
 
-def get_tasks_from_api(challenge_id):
-    response = requests.get('{}/api/v2/challenge/{}/children'.format(url, challenge_id), headers=header)
-    print(response.status_code)
+    def get_tasks_from_api(challenge_id):
+        payload = {'limit': 10000}
+        response = requests.get('{}/api/v2/challenge/{}/tasks'.format(config.url, challenge_id), headers=header, params=payload)
+        return response
+
+    def upload_tasks(tasks):
+        print('Uploading {} tasks'.format(len(tasks)))
+        response = requests.post('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=header)
+        return response
+
+    def update_tasks(tasks):
+        print('Uploading {} tasks'.format(len(tasks)))
+        response = requests.put('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=header)
+        return response
 
 
 if __name__ == '__main__':
     selection = None
+    admin = admin_tool()
     while selection != 'q':
         selection = input(
 '''Select One:
@@ -118,21 +129,19 @@ if __name__ == '__main__':
 [3] Create Challenge
 [4] Update Challenge
 [5] Create Tasks
-[6] Update Tasks
 [q] Quit
 ==> ''')
+
         if (selection == '1'):
-            manage('project', True)
+            admin_tool.manage('project', True)
         elif (selection == '2'):
-            manage('project')
+            admin_tool.manage('project')
         elif (selection == '3'):
-            manage('challenge', True)
+            admin_tool.manage('challenge', True)
         elif (selection == '4'):
-            manage('challenge')
+            admin_tool.manage('challenge')
         elif (selection == '5'):
-            task_manager()
-        elif (selection == '6'):
-            task_manager(update=True)
+            admin_tool.task_manager()
         elif (selection == 'q'):
             break
         else:
