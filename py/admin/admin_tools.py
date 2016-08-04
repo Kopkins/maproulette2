@@ -3,6 +3,7 @@
 import requests
 import json
 from config import config
+from db_tools import db_tool
 
 class admin_tool:
 
@@ -18,6 +19,7 @@ class admin_tool:
                       }
 
     def manage(self, type, create=False):
+        '''manages the creation and update of challenges and projects'''
         print('Enter each field or leave blank to skip')
         payload = {}
 
@@ -50,7 +52,9 @@ class admin_tool:
                                     data=json.dumps(payload), headers=self.header)
         return response
 
+
     def create_upload_tasks(self):
+        '''Reads a geojson file specified in config, then generates and uploads the tasks to maproulete'''
 
         # open the file with our task geojson
         with open(config.geojson_file) as task_file:
@@ -69,6 +73,7 @@ class admin_tool:
 
 
     def generate_tasks(self, geojson, parent):
+        '''generates tasks for the given geojson for the parent id specified'''
         # build a task for each item in the geojson array
         task_num = 1
         tasks = []
@@ -104,16 +109,19 @@ class admin_tool:
 
 
     def get_tasks_from_api(self, challenge_id):
+        '''http get up to 10000 tasks from maproulette'''
         payload = {'limit': 10000}
         response = requests.get('{}/api/v2/challenge/{}/tasks'.format(config.url, challenge_id), headers=self.header, params=payload)
         return response
 
     def upload_tasks(self, tasks):
+        '''http POST a list of tasks to maproulette'''
         print('Uploading {} tasks'.format(len(tasks)))
         response = requests.post('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=self.header)
         return response
 
     def update_tasks(self, tasks):
+        '''http PUT a list of tasks to maproulette'''
         print('Uploading {} tasks'.format(len(tasks)))
         response = requests.put('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=self.header)
         return response

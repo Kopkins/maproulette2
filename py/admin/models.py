@@ -8,9 +8,10 @@ Base = declarative_base()
 
 class Challenge(Base):
     __tablename__ = 'challenges'
-    id = Column(BigInteger, primary_key=True)
+    id = Column(Integer, primary_key=True)
     name = Column(String(64), nullable=False)
     instruction = Column(String(512), nullable=False)
+    active = Column(Integer, nullable=False)
 
     # points to all the tasks that belong to this challenge
     tasks = relationship('Task', backref='challenge', lazy='dynamic')
