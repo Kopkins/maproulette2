@@ -4,31 +4,34 @@ import requests
 import json
 from config import config
 
-class admin_tool():
-    header = {'Content-Type': 'application/json',
-              'apiKey': config.api_key}
+class admin_tool:
 
-    required = ['name', 'instruction', 'id']
-    fields = {'project': ['name', 'description'],
-              'challenge': ['name', 'parent', 'identifier', 'difficulty',  'description',
-                            'blurb', 'instruction']
-             }
+    def __init__(self):
+        self.header = {'Content-Type': 'application/json',
+                       'apiKey': config.api_key}
 
-    def manage(type, create=False):
+        self.required = ['name', 'instruction', 'id']
+        self.fields = {
+                       'project': ['name', 'description'],
+                       'challenge': ['name', 'parent', 'identifier', 'difficulty',
+                                     'description', 'blurb', 'instruction']
+                      }
+
+    def manage(self, type, create=False):
         print('Enter each field or leave blank to skip')
         payload = {}
 
         # if it's being updated we need it's ID
         if not create:
             # Needs the ID field if being updated
-            fields[type].append('id')
+            self.fields[type].append('id')
 
         # fill in all the fields for the api call
-        for field in fields[type]:
+        for field in self.fields[type]:
 
             # if it's a required field, make sure it's filled in
             data = ''
-            if field in required:
+            if field in self.required:
                 while not data:
                     print(field, 'is required')
                     data = input(field + ': ')
@@ -41,25 +44,34 @@ class admin_tool():
         response = ''
         if create:
             response = requests.post('{}/api/v2/{}'.format(config.url, type),
-                                     data=json.dumps(payload), headers=header)
+                                     data=json.dumps(payload), headers=self.header)
         else:
             response = requests.put('{}/api/v2/{}/{}'.format(config.url, type, payload['id']),
-                                    data=json.dumps(payload), headers=header)
+                                    data=json.dumps(payload), headers=self.header)
         return response
 
-    def task_manager():
+    def create_upload_tasks(self):
 
         # open the file with our task geojson
         with open(config.geojson_file) as task_file:
             geojson = json.loads(task_file.read())
 
-        tasks = []
-        task_num = 1
-
         # we'll need the parent id for the api call
         parent = int(input('Enter parent id: '))
 
+        tasks = self.generate_tasks(geojson, parent)
+
+        while len(tasks) > 10000:
+            batch = tasks[:10000]
+            tasks = tasks[10000:]
+            self.upload_tasks(batch)
+        self.upload_tasks(tasks)
+
+
+    def generate_tasks(self, geojson, parent):
         # build a task for each item in the geojson array
+        task_num = 1
+        tasks = []
         for feature in geojson['features']:
             task = {
                         'name': 'task-' + str(task_num),
@@ -88,33 +100,22 @@ class admin_tool():
             # add the task to the list for later
             tasks.append(task)
             task_num += 1
+        return tasks
 
-            # if we have a significant number of tasks, push them up to the server so the size of
-            # the request isn't too large
-            if len(tasks) >= 10000:
-                upload_tasks(tasks)
-                # reset the tasks list since the others were sent off
-                tasks = []
 
-        # if we end up here, we've finished the task creation. send off whats left.
-        upload_tasks(tasks)
-
-    def generate_tasks(geojson):
-        pass
-
-    def get_tasks_from_api(challenge_id):
+    def get_tasks_from_api(self, challenge_id):
         payload = {'limit': 10000}
-        response = requests.get('{}/api/v2/challenge/{}/tasks'.format(config.url, challenge_id), headers=header, params=payload)
+        response = requests.get('{}/api/v2/challenge/{}/tasks'.format(config.url, challenge_id), headers=self.header, params=payload)
         return response
 
-    def upload_tasks(tasks):
+    def upload_tasks(self, tasks):
         print('Uploading {} tasks'.format(len(tasks)))
-        response = requests.post('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=header)
+        response = requests.post('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=self.header)
         return response
 
-    def update_tasks(tasks):
+    def update_tasks(self, tasks):
         print('Uploading {} tasks'.format(len(tasks)))
-        response = requests.put('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=header)
+        response = requests.put('{}/api/v2/tasks'.format(config.url), data=json.dumps(tasks), headers=self.header)
         return response
 
 
@@ -133,15 +134,15 @@ if __name__ == '__main__':
 ==> ''')
 
         if (selection == '1'):
-            admin_tool.manage('project', True)
+            admin.manage('project', True)
         elif (selection == '2'):
-            admin_tool.manage('project')
+            admin.manage('project')
         elif (selection == '3'):
-            admin_tool.manage('challenge', True)
+            admin.manage('challenge', True)
         elif (selection == '4'):
-            admin_tool.manage('challenge')
+            admin.manage('challenge')
         elif (selection == '5'):
-            admin_tool.task_manager()
+            admin.create_upload_tasks()
         elif (selection == 'q'):
             break
         else:

@@ -23,6 +23,7 @@ class Challenge(Base):
 class Task(Base):
     __tablename__ = 'tasks'
     id = Column(BigInteger, primary_key=True)
+    mr_id = Column(Integer, index=True)
     name = Column(String(64), nullable=False)
     instruction = Column(String(512), nullable=False)
     status = Column(Integer, nullable=False)
